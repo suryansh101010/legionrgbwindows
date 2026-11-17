@@ -1,0 +1,42 @@
+name: Windows build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["windows-port"]
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          vcpkg install qtbase qtmultimedia libusb --triplet x64-windows
+      - name: Configure
+        shell: pwsh
+        run: |
+          cmake -S . -B build -A x64 `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows `
+            -DBUILD_TESTING=OFF `
+            -DCMAKE_INSTALL_PREFIX="$pwd/stage"
+      - name: Build
+        run: cmake --build build --config Release --parallel
+      - name: Stage application
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force stage | Out-Null
+          Copy-Item build/gui/Release/legionaura-gui.exe stage/
+          Copy-Item build/cli/Release/legionaura.exe stage/ -ErrorAction SilentlyContinue
+          Copy-Item devices/devices.json stage/
+          $windeployqt = Get-ChildItem "$env:VCPKG_ROOT/installed/x64-windows/tools" -Recurse -Filter windeployqt.exe | Select-Object -First 1
+          if (-not $windeployqt) { throw "windeployqt.exe not found in vcpkg installation" }
+          & $windeployqt.FullName --release --compiler-runtime stage/legionaura-gui.exe
+          Copy-Item "$env:VCPKG_ROOT/installed/x64-windows/bin/libusb-1.0.dll" stage/ -ErrorAction Stop
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LegionAura-Windows-x64
+          path: stage/
+          if-no-files-found: error
